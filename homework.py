@@ -13,7 +13,7 @@ load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
-    filename='bot.log', 
+    filename='bot.log',
     format='%(asctime)s, %(levelname)s, %(message)s, %(name)s'
 )
 
@@ -84,10 +84,7 @@ def parse_status(homework):
     """Возвращает статус домашнего задания"""
     homework_name = homework.get('homework_name')
     homework_status = homework.get('status')
-
     verdict = HOMEWORK_STATUSES[homework_status]
-
-
     return f'Изменился статус проверки работы "{homework_name}". {verdict}'
 
 

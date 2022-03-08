@@ -110,7 +110,7 @@ def main():
     """Основная логика работы бота."""
 
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
-    current_timestamp = int(time.time()) - 3592000
+    current_timestamp = int(time.time())
 
     if not check_tokens():
         logging.critical('Отсутствие обязательных переменных окружения')

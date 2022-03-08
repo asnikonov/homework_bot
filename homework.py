@@ -3,10 +3,13 @@ import os
 import time
 from http import HTTPStatus
 from logging.handlers import RotatingFileHandler
+from queue import Empty
 
 import requests
 import telegram
 from dotenv import load_dotenv
+
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -20,10 +23,6 @@ logger.setLevel(logging.INFO)
 # Указываем обработчик логов
 handler = RotatingFileHandler('bot.log', maxBytes=50000000, backupCount=5)
 logger.addHandler(handler)
-
-
-load_dotenv()
-
 
 PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
@@ -42,8 +41,9 @@ HOMEWORK_STATUSES = {
 
 
 def send_message(bot, message):
-    bot=telegram.Bot(token=TELEGRAM_TOKEN)
+    """Бот отправляет сообщение."""
     bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+    logging.info('Сообщение успешно отправлено.')
 
 
 def get_api_answer(current_timestamp):
@@ -51,40 +51,42 @@ def get_api_answer(current_timestamp):
     try:
         timestamp = current_timestamp or int(time.time())
         params = {'from_date': timestamp}
-        homework_statuses = requests.get(
+        response = requests.get(
             ENDPOINT, headers=HEADERS, params=params
         )
-        response = homework_statuses.json()
-        return response
+        if response.status_code == HTTPStatus.OK:
+            return response.json()
+        else:
+            status_code = response.status_code
+            logger.error(f'Ошибка {status_code}')
+            raise ConnectionError(f'Ошибка {status_code}')
     except ValueError:
         logger.error('Ошибка при формировании json (response)')
         raise ValueError('Ошибка при формировании json(response)')
     except Exception as error:
         logger.error(f'API ошибка запроса: {error}')
         raise Exception(f'API ошибка запроса: {error}')
-    except:
-        if homework_statuses.status_code != HTTPStatus.OK:
-            status_code = homework_statuses.status_code
-            logger.error(f'Ошибка {status_code}')
-            raise Exception(f'Ошибка {status_code}')
 
 
 def check_response(response):
     """Проверяем корректность ответа API"""
-    ...
-    homework = response["homeworks"]
+    if type(response) != dict:
+        raise TypeError('Ответ API имеет неверный тип данных.')
+    elif type(response['homeworks']) != list:
+        raise TypeError('Домашние задания приходят не в виде списка.')
+    elif len(response['homeworks']) == 0:
+        raise Empty('В ответе от API нет новых домашних заданий.')
+    homework = response.get('homeworks')
     return homework
 
 
 def parse_status(homework):
-    homework_name = homework["homework_name"]
-    homework_status = homework["status"]
-
-    ...
+    """Возвращает статус домашнего задания"""
+    homework_name = homework.get('homework_name')
+    homework_status = homework.get('status')
 
     verdict = HOMEWORK_STATUSES[homework_status]
 
-    ...
 
     return f'Изменился статус проверки работы "{homework_name}". {verdict}'
 
@@ -100,24 +102,26 @@ def check_tokens():
         message = 'Отсутствует или не задана переменная окружения.'
         logging.critical(message)
         return False
-    return True
+    else:
+        return True
 
 
 def main():
     """Основная логика работы бота."""
 
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
-    current_timestamp = int(time.time())
+    current_timestamp = int(time.time()) - 3592000
 
     if not check_tokens():
+        logging.critical('Отсутствие обязательных переменных окружения')
         raise ('Проверьте токены приложения')
 
     while True:
         try:
             response = get_api_answer(current_timestamp)
-            answer = check_response(response)
-            for i in range(len(answer)):
-                message = parse_status(i)
+            homework = check_response(response)[0]
+            if homework:
+                message = parse_status(homework)
                 send_message(bot, message)
                 logging.info('Удачная отправка сообщения в Telegram.')
             current_timestamp = int(time.time())
@@ -128,6 +132,7 @@ def main():
             time.sleep(RETRY_TIME)
         else:
             logging.error('Другие сбои при запросе к эндпоинту.')
+        logger.info('Бот начал работу.')
 
 
 if __name__ == '__main__':

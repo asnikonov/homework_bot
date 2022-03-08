@@ -69,7 +69,7 @@ def get_api_answer(current_timestamp):
 
 
 def check_response(response):
-    """Проверяем корректность ответа API"""
+    """Проверяем корректность ответа API."""
     if type(response) != dict:
         raise TypeError('Ответ API имеет неверный тип данных.')
     elif type(response['homeworks']) != list:
@@ -81,7 +81,7 @@ def check_response(response):
 
 
 def parse_status(homework):
-    """Возвращает статус домашнего задания"""
+    """Возвращает статус домашнего задания."""
     homework_name = homework.get('homework_name')
     homework_status = homework.get('status')
     verdict = HOMEWORK_STATUSES[homework_status]
@@ -105,7 +105,6 @@ def check_tokens():
 
 def main():
     """Основная логика работы бота."""
-
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     current_timestamp = int(time.time())
 

@@ -2,12 +2,14 @@ import logging
 import logging.handlers
 import os
 import time
+from ast import arguments
 from http import HTTPStatus
-from urllib.error import HTTPError
 
 import requests
 import telegram
 from dotenv import load_dotenv
+
+from exceptions import UnexpectedStatusCode
 
 load_dotenv()
 
@@ -17,17 +19,17 @@ format = (
     '%(funcName)s - %(lineno)s - %(message)s,'
 ),
 logger.setLevel(logging.DEBUG)
-sh = logging.StreamHandler()
-sh.setFormatter(logging.Formatter(format))
-sh.setLevel(logging.DEBUG)
-rh = logging.handlers.RotatingFileHandler(
+STREAM_HANDLER = logging.StreamHandler()
+STREAM_HANDLER.setFormatter(logging.Formatter(format))
+STREAM_HANDLER.setLevel(logging.DEBUG)
+ROTATING_HANDLER = logging.handlers.RotatingFileHandler(
     (__file__.rsplit('.', 1)[0] + '.log'), maxBytes=50000000, backupCount=5,)
-rh.setFormatter(logging.Formatter(format))
-rh.setLevel(logging.DEBUG)
+ROTATING_HANDLER.setFormatter(logging.Formatter(format))
+ROTATING_HANDLER.setLevel(logging.DEBUG)
 
 
-logger.addHandler(rh)
-logger.addHandler(sh)
+logger.addHandler(ROTATING_HANDLER)
+logger.addHandler(STREAM_HANDLER)
 logger.debug('Логгер запущен')
 
 PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
@@ -54,8 +56,13 @@ def send_message(bot, message):
     logger.info(MESSAGE.format(message))
 
 
-API_ERROR_DESC = 'При выполнении запроса: {response}, произошла ошибка {code}'
-CONNECTION_ERROR = 'API ошибка запроса: {response} закончился ошибкой {error}'
+API_ERROR_DESCRIPTION = ('При выполнении запроса: {} с параметрами {},'
+                         'произошла ошибка {}')
+CONNECTION_ERROR = ('API ошибка запроса: {} закончился ошибкой {}')
+UNEXPECTED_RESPONSE = ('Неожиданный ответ от сервера.'
+                       'Сервер вернул ключ {}'
+                       'Параметры запроса: {}'
+                       'Содержание ответа:{}')
 
 
 def get_api_answer(current_timestamp):
@@ -64,25 +71,27 @@ def get_api_answer(current_timestamp):
         response = requests.get(
             ENDPOINT, headers=HEADERS, params={'from_date': current_timestamp}
         )
-        if response.status_code == HTTPStatus.OK:
-            if 'code' in response.json():
-                raise ValueError(f'Неожиданный ответ от сервера.'
-                                 f'Содержание ответа:{response.json()}')
-            elif 'error' in response.json():
-                raise ValueError(f'Неожиданный ответ от сервера.'
-                                 f'Содержание ответа:{response.json()}')
-            else:
-                return response.json()
-        else:
-            status_code = response.status_code
-            raise HTTPError(API_ERROR_DESC.format(response=response,
-                                                  code=status_code))
-    except ConnectionError as error:
+    except Exception as error:
         raise ConnectionError(CONNECTION_ERROR.format(response=response,
                                                       error=error))
+    if response.status_code == HTTPStatus.OK:
+        for key in response.json():
+            if key != 'code' or 'error':
+                return response.json()
+            else:
+                raise ValueError(UNEXPECTED_RESPONSE
+                                 .format(key,
+                                         response(arguments),
+                                         response.json()))
+    else:
+        status_code = response.status_code
+        raise UnexpectedStatusCode(API_ERROR_DESCRIPTION.
+                                   format(response,
+                                          response(arguments),
+                                          status_code))
 
 
-TYPE_NULL = 'Ответ API вернул пустой список.'
+TYPE_NULL = 'В запросе нет такого ключа.'
 TYPE_NOT_DICT = 'Ответ API не является словарем.'
 TYPE_NOT_ISINSTANCE = 'Ответ API не является списком.'
 
@@ -94,20 +103,18 @@ def check_response(response):
     try:
         homework = response['homeworks']
     except homework is None:
-        raise TypeError(TYPE_NULL)
-    except homework is not isinstance(homework, list):
-        raise TypeError(TYPE_NOT_ISINSTANCE)
+        raise KeyError(TYPE_NULL)
     if type(response['homeworks']) != list:
         raise TypeError(TYPE_NOT_ISINSTANCE)
+    if not isinstance(homework, list):
+        raise TypeError(TYPE_NOT_ISINSTANCE)
+
     # Без этой проверки не пропускают тесты
     return homework
 
 
-UNEXPECTED_HW = 'Ответ API вернул неизвестную домашнюю работу.'
-UNEXPECTED_STATUS = 'Ответ API вернул неизвестный статус домашней работы.'
-
-
-PHRASE = 'Статус домашней работы {status} отсутствует в ожидаемых.'
+UNEXPECTED_STATUS = 'Статус домашней работы {} отсутствует в ожидаемых.'
+CHANGE_STATUS = 'Изменился статус проверки работы "{}". {}'
 
 
 def parse_status(homework):
@@ -115,34 +122,34 @@ def parse_status(homework):
     name = homework['homework_name']
     status = homework['status']
     verdict = HOMEWORK_STATUSES[status]
-    if status not in HOMEWORK_STATUSES.keys():
-        raise ValueError(PHRASE.format(status=status))
-    return (f'Изменился статус проверки работы "{name}". {verdict}')
+    if status not in HOMEWORK_STATUSES:
+        raise ValueError(UNEXPECTED_STATUS.format(status))
+    return (CHANGE_STATUS.format(name, verdict))
 
 
-TOKEN_ERROR = 'Отсутствует обязательная переменная окружения: {key}'
+TOKEN_ERROR = 'Отсутствует обязательная переменная окружения: {}'
+
+TOKENS = ('PRACTICUM_TOKEN', 'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID')
 
 
 def check_tokens():
     """Доступны переменные окружения."""
-    TOKENS = {
-        'PRACTICUM_TOKEN': PRACTICUM_TOKEN,
-        'TELEGRAM_TOKEN': TELEGRAM_TOKEN,
-        'TELEGRAM_CHAT_ID': TELEGRAM_CHAT_ID,
-    }
-    # При выносе этого блока на уровень модуля, падают тесты
-    for key, value in TOKENS.items():
-        if value is None:
-            logger.critical(TOKEN_ERROR.format(key=key))
+    for name in TOKENS:
+        if globals()[name] is None:
+            logger.critical(TOKEN_ERROR.format(name))
             return False
     return True
+
+
+ENV_NONE = 'Отсутствие обязательных переменных окружения'
+TOKEN_CHECK = 'Проверьте токены приложения'
 
 
 def main():
     """Основная логика работы бота."""
     if not check_tokens():
-        logger.critical('Отсутствие обязательных переменных окружения')
-        raise ValueError('Проверьте токены приложения')
+        logger.critical(ENV_NONE)
+        raise ValueError(TOKEN_CHECK)
 
     while True:
         try:
@@ -153,7 +160,6 @@ def main():
             if homework:
                 message = parse_status(homework)
                 send_message(bot, message)
-                time.sleep(RETRY_TIME)
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
             logger.exception(message)
@@ -167,13 +173,4 @@ def main():
 
 if __name__ == '__main__':
 
-    logging.basicConfig(
-        level=logging.DEBUG,
-        filename=(__file__.rsplit('.', 1)[0] + '.log'),
-        format=(
-            '%(asctime)s - %(levelname)s - %(name)s - '
-            '%(funcName)s - %(lineno)s - %(message)s,'
-        ),
-        filemode='w'
-    )
     main()

@@ -144,8 +144,8 @@ def check_tokens():
     """Доступны переменные окружения."""
     for name in TOKENS:
         if globals()[name] is None:
-            logger.critical(TOKEN_ERROR.format(name))
             return False
+        logger.critical(TOKEN_ERROR.format(name))
     return True
 
 

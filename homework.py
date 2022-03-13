@@ -4,10 +4,12 @@ import os
 import time
 from ast import arguments
 from http import HTTPStatus
+from re import S
 
 import requests
 import telegram
 from dotenv import load_dotenv
+from requests import RequestException
 
 from exceptions import UnexpectedStatusCode
 
@@ -19,17 +21,17 @@ format = (
     '%(funcName)s - %(lineno)s - %(message)s,'
 ),
 logger.setLevel(logging.DEBUG)
-STREAM_HANDLER = logging.StreamHandler()
-STREAM_HANDLER.setFormatter(logging.Formatter(format))
-STREAM_HANDLER.setLevel(logging.DEBUG)
-ROTATING_HANDLER = logging.handlers.RotatingFileHandler(
+stream_handler = logging.StreamHandler()
+stream_handler.setFormatter(logging.Formatter(format))
+stream_handler.setLevel(logging.DEBUG)
+rotating_handler = logging.handlers.RotatingFileHandler(
     (__file__.rsplit('.', 1)[0] + '.log'), maxBytes=50000000, backupCount=5,)
-ROTATING_HANDLER.setFormatter(logging.Formatter(format))
-ROTATING_HANDLER.setLevel(logging.DEBUG)
+rotating_handler.setFormatter(logging.Formatter(format))
+rotating_handler.setLevel(logging.DEBUG)
 
 
-logger.addHandler(ROTATING_HANDLER)
-logger.addHandler(STREAM_HANDLER)
+logger.addHandler(rotating_handler)
+logger.addHandler(stream_handler)
 logger.debug('Логгер запущен')
 
 PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
@@ -58,42 +60,48 @@ def send_message(bot, message):
 
 API_ERROR_DESCRIPTION = ('При выполнении запроса: {} с параметрами {},'
                          'произошла ошибка {}')
-CONNECTION_ERROR = ('API ошибка запроса: {} закончился ошибкой {}')
+CONNECTION_ERROR = ('API запрос с параметрами: {} закончился ошибкой {}')
 UNEXPECTED_RESPONSE = ('Неожиданный ответ от сервера.'
                        'Сервер вернул ключ {}'
+                       'URL: {}'
                        'Параметры запроса: {}'
                        'Содержание ответа:{}')
 
 
 def get_api_answer(current_timestamp):
     """Функция делает запрос к API Яндекс практикума."""
+    params = {'from_date': current_timestamp}
     try:
         response = requests.get(
-            ENDPOINT, headers=HEADERS, params={'from_date': current_timestamp}
+            ENDPOINT, headers=HEADERS, params=params
         )
-    except Exception as error:
-        raise ConnectionError(CONNECTION_ERROR.format(response=response,
-                                                      error=error))
+        save_json = response.json()
+    except RequestException as error:
+        raise ConnectionError(
+            CONNECTION_ERROR.format(params, error))
     if response.status_code == HTTPStatus.OK:
-        for key in response.json():
-            if key != 'code' or 'error':
-                return response.json()
+        for key in save_json:
+            if key != 'code':
+                return save_json
+            if key != 'error':
+                return save_json
             else:
                 raise ValueError(UNEXPECTED_RESPONSE
                                  .format(key,
-                                         response(arguments),
-                                         response.json()))
+                                         response.url,
+                                         params,
+                                         save_json))
     else:
         status_code = response.status_code
         raise UnexpectedStatusCode(API_ERROR_DESCRIPTION.
                                    format(response,
-                                          response(arguments),
+                                          params,
                                           status_code))
 
 
-TYPE_NULL = 'В запросе нет такого ключа.'
+KEY_MISSING = 'В запросе нет ключа {}.'
 TYPE_NOT_DICT = 'Ответ API не является словарем.'
-TYPE_NOT_ISINSTANCE = 'Ответ API не является списком.'
+RESPONSE_NOT_LIST = 'Ответ API не является списком.'
 
 
 def check_response(response):
@@ -103,11 +111,11 @@ def check_response(response):
     try:
         homework = response['homeworks']
     except homework is None:
-        raise KeyError(TYPE_NULL)
+        raise KeyError(KEY_MISSING.format(homework))
     if type(response['homeworks']) != list:
-        raise TypeError(TYPE_NOT_ISINSTANCE)
+        raise TypeError(RESPONSE_NOT_LIST)
     if not isinstance(homework, list):
-        raise TypeError(TYPE_NOT_ISINSTANCE)
+        raise TypeError(RESPONSE_NOT_LIST)
 
     # Без этой проверки не пропускают тесты
     return homework
@@ -124,7 +132,7 @@ def parse_status(homework):
     verdict = HOMEWORK_STATUSES[status]
     if status not in HOMEWORK_STATUSES:
         raise ValueError(UNEXPECTED_STATUS.format(status))
-    return (CHANGE_STATUS.format(name, verdict))
+    return CHANGE_STATUS.format(name, verdict)
 
 
 TOKEN_ERROR = 'Отсутствует обязательная переменная окружения: {}'
@@ -143,6 +151,9 @@ def check_tokens():
 
 ENV_NONE = 'Отсутствие обязательных переменных окружения'
 TOKEN_CHECK = 'Проверьте токены приложения'
+SEND_MESSAGE = 'Сбой в работе программы: {}'
+MESSAGE_ERROR = ('Не удалось отправить сообщение "{}".'
+                 'Произошла ошибка: {}')
 
 
 def main():
@@ -160,14 +171,15 @@ def main():
             if homework:
                 message = parse_status(homework)
                 send_message(bot, message)
+            current_timestamp = response.get('current_date')
+            time.sleep(RETRY_TIME)
         except Exception as error:
-            message = f'Сбой в работе программы: {error}'
+            message = SEND_MESSAGE.format(error)
             logger.exception(message)
             try:
                 send_message(bot, message)
             except Exception as error:
-                logger.exception(f'Не удалось отправить сообщение!'
-                                 f'Произошла ошибка:{error}')
+                logger.exception(MESSAGE_ERROR.format(message, error))
             time.sleep(RETRY_TIME)
 
 

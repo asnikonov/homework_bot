@@ -2,9 +2,7 @@ import logging
 import logging.handlers
 import os
 import time
-from ast import arguments
 from http import HTTPStatus
-from re import S
 
 import requests
 import telegram

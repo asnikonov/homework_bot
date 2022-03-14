@@ -58,10 +58,11 @@ def send_message(bot, message):
 
 API_ERROR_DESCRIPTION = ('При выполнении запроса с параметрами {}, {}, {},'
                          'произошла ошибка. Код ошибки: {}')
-CONNECTION_ERROR = ('API запрос с параметрами: {}, {}, закончился ошибкой {}')
+CONNECTION_ERROR = (
+    'API запрос с параметрами: {}, {}, {}, закончился ошибкой {}')
 UNEXPECTED_RESPONSE = ('Неожиданный ответ от сервера.'
-                       'Параметры запроса: {}, {}'
-                       'Детали ошибки: {}')
+                       'Параметры запроса: {}, {}, {}'
+                       'Получен ключ: {}, со значением: {}')
 
 
 def get_api_answer(current_timestamp):
@@ -73,26 +74,25 @@ def get_api_answer(current_timestamp):
         )
     except RequestException as error:
         raise ConnectionError(
-            CONNECTION_ERROR.format(params, HEADERS, error))
+            CONNECTION_ERROR.format(ENDPOINT, params, HEADERS, error))
     saved_json = response.json()
     error_keys = ('code', 'error')
-    if response.status_code == HTTPStatus.OK:
-        if any(key in saved_json for key in error_keys):
-            error_detail = ', '.join(f'{item}={saved_json.get(item)}' if
-                                     saved_json.get(item) else
-                                     '' for item in error_keys)
-            raise ValueError(UNEXPECTED_RESPONSE
-                             .format(HEADERS,
-                                     params,
-                                     error_detail))
-        return saved_json
-    else:
-        status_code = response.status_code
+    status_code = response.status_code
+    if response.status_code != HTTPStatus.OK:
         raise UnexpectedStatusCode(API_ERROR_DESCRIPTION.
                                    format(ENDPOINT,
                                           HEADERS,
                                           params,
                                           status_code))
+    for key in error_keys:
+        if key in saved_json:
+            raise ValueError(UNEXPECTED_RESPONSE
+                             .format(ENDPOINT,
+                                     HEADERS,
+                                     params,
+                                     key,
+                                     saved_json[key]))
+    return saved_json
 
 
 KEY_MISSING = 'В запросе нет ключа {}.'
@@ -105,7 +105,7 @@ def check_response(response):
     if type(response) is not dict:
         raise TypeError(TYPE_NOT_DICT)
     homework = response['homeworks']
-    if homework is None:
+    if 'homeworks' not in response:
         raise KeyError(KEY_MISSING.format(homework))
     if not isinstance(homework, list):
         raise TypeError(RESPONSE_NOT_LIST)

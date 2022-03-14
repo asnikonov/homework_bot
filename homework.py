@@ -56,13 +56,12 @@ def send_message(bot, message):
     logger.info(MESSAGE.format(message))
 
 
-API_ERROR_DESCRIPTION = ('При выполнении запроса с параметрами {}, {},'
+API_ERROR_DESCRIPTION = ('При выполнении запроса с параметрами {}, {}, {},'
                          'произошла ошибка. Код ошибки: {}')
 CONNECTION_ERROR = ('API запрос с параметрами: {}, {}, закончился ошибкой {}')
 UNEXPECTED_RESPONSE = ('Неожиданный ответ от сервера.'
-                       'Сервер вернул ключ {}'
-                       'Параметры запроса: {},{}'
-                       'Содержание ответа:{}')
+                       'Параметры запроса: {}, {}'
+                       'Детали ошибки: {}')
 
 
 def get_api_answer(current_timestamp):
@@ -75,28 +74,30 @@ def get_api_answer(current_timestamp):
     except RequestException as error:
         raise ConnectionError(
             CONNECTION_ERROR.format(params, HEADERS, error))
-    save_json = response.json()
-    keys = ('code', 'error')
+    saved_json = response.json()
+    error_keys = ('code', 'error')
     if response.status_code == HTTPStatus.OK:
-        for key in keys:
-            if key not in save_json:
-                return save_json
+        if any(key in saved_json for key in error_keys):
+            error_detail = ', '.join(f'{item}={saved_json.get(item)}' if
+                                     saved_json.get(item) else
+                                     '' for item in error_keys)
             raise ValueError(UNEXPECTED_RESPONSE
-                             .format(key,
-                                     HEADERS,
+                             .format(HEADERS,
                                      params,
-                                     save_json[key]))
+                                     error_detail))
+        return saved_json
     else:
         status_code = response.status_code
         raise UnexpectedStatusCode(API_ERROR_DESCRIPTION.
-                                   format(HEADERS,
+                                   format(ENDPOINT,
+                                          HEADERS,
                                           params,
                                           status_code))
 
 
 KEY_MISSING = 'В запросе нет ключа {}.'
 TYPE_NOT_DICT = 'Ответ API не является словарем.'
-RESPONSE_NOT_LIST = 'Ответ API не является списком.'
+RESPONSE_NOT_LIST = 'Ответ API не содержит список.'
 
 
 def check_response(response):
@@ -106,7 +107,7 @@ def check_response(response):
     homework = response['homeworks']
     if homework is None:
         raise KeyError(KEY_MISSING.format(homework))
-    elif not isinstance(homework, list):
+    if not isinstance(homework, list):
         raise TypeError(RESPONSE_NOT_LIST)
 
     # Без этой проверки не пропускают тесты

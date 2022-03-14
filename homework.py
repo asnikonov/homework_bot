@@ -56,13 +56,12 @@ def send_message(bot, message):
     logger.info(MESSAGE.format(message))
 
 
-API_ERROR_DESCRIPTION = ('При выполнении запроса: {} с параметрами {},'
-                         'произошла ошибка {}')
-CONNECTION_ERROR = ('API запрос с параметрами: {} закончился ошибкой {}')
+API_ERROR_DESCRIPTION = ('При выполнении запроса с параметрами {}, {},'
+                         'произошла ошибка. Код ошибки: {}')
+CONNECTION_ERROR = ('API запрос с параметрами: {}, {}, закончился ошибкой {}')
 UNEXPECTED_RESPONSE = ('Неожиданный ответ от сервера.'
                        'Сервер вернул ключ {}'
-                       'URL: {}'
-                       'Параметры запроса: {}'
+                       'Параметры запроса: {},{}'
                        'Содержание ответа:{}')
 
 
@@ -73,26 +72,24 @@ def get_api_answer(current_timestamp):
         response = requests.get(
             ENDPOINT, headers=HEADERS, params=params
         )
-        save_json = response.json()
     except RequestException as error:
         raise ConnectionError(
-            CONNECTION_ERROR.format(params, error))
+            CONNECTION_ERROR.format(params, HEADERS, error))
+    save_json = response.json()
+    keys = ('code', 'error')
     if response.status_code == HTTPStatus.OK:
-        for key in save_json:
-            if key != 'code':
+        for key in keys:
+            if key not in save_json:
                 return save_json
-            if key != 'error':
-                return save_json
-            else:
-                raise ValueError(UNEXPECTED_RESPONSE
-                                 .format(key,
-                                         response.url,
-                                         params,
-                                         save_json))
+            raise ValueError(UNEXPECTED_RESPONSE
+                             .format(key,
+                                     HEADERS,
+                                     params,
+                                     save_json[key]))
     else:
         status_code = response.status_code
         raise UnexpectedStatusCode(API_ERROR_DESCRIPTION.
-                                   format(response,
+                                   format(HEADERS,
                                           params,
                                           status_code))
 
@@ -106,13 +103,10 @@ def check_response(response):
     """Проверяем корректность ответа API."""
     if type(response) is not dict:
         raise TypeError(TYPE_NOT_DICT)
-    try:
-        homework = response['homeworks']
-    except homework is None:
+    homework = response['homeworks']
+    if homework is None:
         raise KeyError(KEY_MISSING.format(homework))
-    if type(response['homeworks']) != list:
-        raise TypeError(RESPONSE_NOT_LIST)
-    if not isinstance(homework, list):
+    elif not isinstance(homework, list):
         raise TypeError(RESPONSE_NOT_LIST)
 
     # Без этой проверки не пропускают тесты
@@ -140,16 +134,17 @@ TOKENS = ('PRACTICUM_TOKEN', 'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID')
 
 def check_tokens():
     """Доступны переменные окружения."""
+    name_in_globals = True
     for name in TOKENS:
         if globals()[name] is None:
-            return False
-        logger.critical(TOKEN_ERROR.format(name))
-    return True
+            name_in_globals = False
+            logger.critical(TOKEN_ERROR.format(name))
+    return name_in_globals
 
 
 ENV_NONE = 'Отсутствие обязательных переменных окружения'
 TOKEN_CHECK = 'Проверьте токены приложения'
-SEND_MESSAGE = 'Сбой в работе программы: {}'
+PROGRAMM_ERROR = 'Сбой в работе программы: {}'
 MESSAGE_ERROR = ('Не удалось отправить сообщение "{}".'
                  'Произошла ошибка: {}')
 
@@ -159,26 +154,23 @@ def main():
     if not check_tokens():
         logger.critical(ENV_NONE)
         raise ValueError(TOKEN_CHECK)
-
+    bot = telegram.Bot(token=TELEGRAM_TOKEN)
+    current_timestamp = int(time.time())
     while True:
         try:
-            bot = telegram.Bot(token=TELEGRAM_TOKEN)
-            current_timestamp = int(time.time())
             response = get_api_answer(current_timestamp)
             homework = check_response(response)[0]
-            if homework:
-                message = parse_status(homework)
-                send_message(bot, message)
-            current_timestamp = response.get('current_date')
-            time.sleep(RETRY_TIME)
+            message = parse_status(homework)
+            send_message(bot, message)
+            current_timestamp = response.get('current_date', current_timestamp)
         except Exception as error:
-            message = SEND_MESSAGE.format(error)
+            message = PROGRAMM_ERROR.format(error)
             logger.exception(message)
             try:
                 send_message(bot, message)
             except Exception as error:
                 logger.exception(MESSAGE_ERROR.format(message, error))
-            time.sleep(RETRY_TIME)
+        time.sleep(RETRY_TIME)
 
 
 if __name__ == '__main__':

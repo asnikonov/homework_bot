@@ -152,6 +152,7 @@ MESSAGE_ERROR = ('Не удалось отправить сообщение "{}"
 
 def main():
     """Основная логика работы бота."""
+    logger.debug('Бот начал работу.')
     if not check_tokens():
         logger.critical(ENV_NONE)
         raise ValueError(TOKEN_CHECK)

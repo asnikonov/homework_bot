@@ -9,7 +9,7 @@ import telegram
 from dotenv import load_dotenv
 from requests import RequestException
 
-from exceptions import UnexpectedStatusCode
+from exceptions import EmptyList, UnexpectedStatusCode
 
 load_dotenv()
 
@@ -109,8 +109,8 @@ def check_response(response):
         raise KeyError(KEY_MISSING.format(homework))
     if not isinstance(homework, list):
         raise TypeError(RESPONSE_NOT_LIST)
-
-    # Без этой проверки не пропускают тесты
+    if response['homeworks'] == []:
+        return []
     return homework
 
 
@@ -160,9 +160,10 @@ def main():
     while True:
         try:
             response = get_api_answer(current_timestamp)
-            homework = check_response(response)[0]
-            message = parse_status(homework)
-            send_message(bot, message)
+            homework = check_response(response)
+            if homework:
+                message = parse_status(homework[0])
+                send_message(bot, message)
             current_timestamp = response.get('current_date', current_timestamp)
         except Exception as error:
             message = PROGRAMM_ERROR.format(error)

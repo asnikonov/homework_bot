@@ -14,10 +14,8 @@ from exceptions import UnexpectedStatusCode
 load_dotenv()
 
 logger = logging.getLogger(__name__)
-format = (
-    '%(asctime)s, %(levelname)s, %(name)s, '
-    '%(funcName)s, %(lineno)s, %(message)s '
-),
+format = ('%(asctime)s, %(levelname)s, %(name)s,'
+          '%(funcName)s, %(lineno)s, %(message)s')
 logger.setLevel(logging.DEBUG)
 stream_handler = logging.StreamHandler()
 stream_handler.setFormatter(logging.Formatter(format))
